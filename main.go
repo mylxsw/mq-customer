@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"os"
 
 	"github.com/mylxsw/mq-customer/log"
+	"github.com/mylxsw/mq-customer/signal"
 	"github.com/streadway/amqp"
 )
 
@@ -36,7 +38,7 @@ type Result struct {
 	Message string `json:"message"`
 }
 
-func startWorker(ch *amqp.Channel, queue Queue, config *Config) {
+func startWorker(ctx context.Context, ch *amqp.Channel, queue Queue, config *Config) {
 
 	log.Debug("[%s] start worker.", queue.Name)
 
@@ -45,40 +47,46 @@ func startWorker(ch *amqp.Channel, queue Queue, config *Config) {
 
 	msgs, _ := ch.Consume(q.Name, "", true, false, false, false, nil)
 
-	for d := range msgs {
-		log.Debug("[%s] Received a message: %s", q.Name, d.Body)
-		startTime := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("[%s] Worker exit.", q.Name)
+			return
+		case d := <-msgs:
+			log.Debug("[%s] Received a message: %s", q.Name, d.Body)
+			startTime := time.Now()
 
-		arguments := "base64://" + base64.StdEncoding.EncodeToString(d.Body)
-		commandArgs := []string{}
-		for _, arg := range queue.Action {
-			commandArgs = append(commandArgs, strings.Replace(arg, "{data}", arguments, -1))
+			arguments := "base64://" + base64.StdEncoding.EncodeToString(d.Body)
+			commandArgs := []string{}
+			for _, arg := range queue.Action {
+				commandArgs = append(commandArgs, strings.Replace(arg, "{data}", arguments, -1))
+			}
+
+			log.Debug("[%s] exec: %s", q.Name, strings.Join(commandArgs, " "))
+
+			cmd := exec.Command(commandArgs[0], commandArgs[1:]...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{
+				Setpgid: true,
+			}
+
+			output, _ := cmd.Output()
+			log.Debug("[%s] output: %s", q.Name, output)
+
+			var res Result
+			json.Unmarshal(output, &res)
+
+			if res.Code == 200 {
+				log.Debug("[%s] Success", q.Name)
+			} else {
+				log.Debug("[%s] Failed", q.Name)
+			}
+
+			log.Debug(
+				"[%s] time-consuming %v",
+				q.Name,
+				time.Since(startTime),
+			)
 		}
-
-		log.Debug("[%s] exec: %s", q.Name, strings.Join(commandArgs, " "))
-
-		cmd := exec.Command(commandArgs[0], commandArgs[1:]...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Setpgid: true,
-		}
-
-		output, _ := cmd.Output()
-		log.Debug("[%s] output: %s", q.Name, output)
-
-		var res Result
-		json.Unmarshal(output, &res)
-
-		if res.Code == 200 {
-			log.Debug("[%s] Success", q.Name)
-		} else {
-			log.Debug("[%s] Failed", q.Name)
-		}
-
-		log.Debug(
-			"[%s] time-consuming %v",
-			q.Name,
-			time.Since(startTime),
-		)
 	}
 }
 
@@ -135,6 +143,10 @@ func main() {
 		log.Fatal("declare exchange failed: %v", err)
 	}
 
+	// register signal handler
+	ctx, cancel := context.WithCancel(context.Background())
+	signal.InitSignalReceiver(ctx, cancel)
+
 	var wg sync.WaitGroup
 	for _, q := range config.Queues {
 		wg.Add(1)
@@ -142,7 +154,7 @@ func main() {
 			defer wg.Done()
 
 			ch, _ := conn.Channel()
-			startWorker(ch, queue, config)
+			startWorker(ctx, ch, queue, config)
 		}(conn, q)
 	}
 
