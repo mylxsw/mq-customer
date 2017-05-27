@@ -1,0 +1,5 @@
+package: github.com/mylxsw/mq-customer
+import:
+- package: github.com/streadway/amqp
+- package: github.com/op/go-logging
+  version: ^1.0.0

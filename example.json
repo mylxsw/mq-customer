@@ -1,0 +1,26 @@
+{
+  "amqp_url": "amqp://guest:guest@localhost:5672/",
+  "exchange_name": "aicode.service",
+  "queues": [
+    {
+      "name": "ucenter.user",
+      "routing_key": "user.*",
+      "action": [
+        "/usr/local/php/bin/php",
+        "/Users/mylxsw/codes/work/laravel-project/artisan",
+        "test",
+        "{data}"
+      ]
+    },
+    {
+      "name": "ucenter.enterprise",
+      "routing_key": "enterprise.*",
+      "action": [
+        "/usr/local/php/bin/php",
+        "/Users/mylxsw/codes/work/laravel-project/artisan",
+        "test2",
+        "{data}"
+      ]
+    }
+  ]
+}
