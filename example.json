@@ -5,8 +5,9 @@
     {
       "name": "ucenter.user",
       "routing_key": "user.*",
+      "worker_count": 2,
       "action": [
-        "/usr/local/php/bin/php",
+        "ping",
         "/Users/mylxsw/codes/work/laravel-project/artisan",
         "test",
         "{data}"
